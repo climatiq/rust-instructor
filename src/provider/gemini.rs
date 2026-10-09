@@ -258,7 +258,11 @@ async fn read_response(resp: reqwest::Response) -> Result<RawResponse> {
     let data_for_error_msg = serde_json::to_string(&data)
         .unwrap_or_else(|e| format!("error serializing gemini response: {}", e));
     // then convert to our Response type for further processing
-    let data: Response = serde_json::from_value(data)?;
+    let data: Response = serde_json::from_value(data)
+        .map_err(|e| Error::Other(format!(
+            "error deserializing gemini response: {}. Response was: {}",
+            e, data_for_error_msg,
+        )))?;
     let usage = data.usage_metadata.unwrap_or_default();
 
     let text = data
