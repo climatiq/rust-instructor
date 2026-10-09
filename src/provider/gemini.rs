@@ -1,6 +1,6 @@
 use schemars::Schema;
 use serde::{Deserialize, Serialize};
-
+use serde_json::Value;
 use super::{ImageInput, Message, RawResponse, StreamCallback};
 use crate::error::{Error, Result};
 use crate::schema;
@@ -253,9 +253,12 @@ pub(crate) async fn send_gemini(
 }
 
 async fn read_response(resp: reqwest::Response) -> Result<RawResponse> {
-    let data: Response = resp.json().await?;
+    // first, preserve the whole response for error logging
+    let data: Value = resp.json().await?;
     let data_for_error_msg = serde_json::to_string(&data)
         .unwrap_or_else(|e| format!("error serializing gemini response: {}", e));
+    // then convert to our Response type for further processing
+    let data: Response = serde_json::from_value(data)?;
     let usage = data.usage_metadata.unwrap_or_default();
 
     let text = data
