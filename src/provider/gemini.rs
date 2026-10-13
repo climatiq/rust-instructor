@@ -1,6 +1,6 @@
 use schemars::Schema;
 use serde::{Deserialize, Serialize};
-
+use serde_json::Value;
 use super::{ImageInput, Message, RawResponse, StreamCallback};
 use crate::error::{Error, Result};
 use crate::schema;
@@ -91,29 +91,29 @@ pub enum ThinkingLevel {
     High,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct Response {
     candidates: Option<Vec<Candidate>>,
     #[serde(rename = "usageMetadata")]
     usage_metadata: Option<UsageMetadata>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct Candidate {
     content: Option<CandidateContent>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct CandidateContent {
     parts: Option<Vec<ResponsePart>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct ResponsePart {
     text: Option<String>,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct UsageMetadata {
     #[serde(default)]
@@ -253,7 +253,16 @@ pub(crate) async fn send_gemini(
 }
 
 async fn read_response(resp: reqwest::Response) -> Result<RawResponse> {
-    let data: Response = resp.json().await?;
+    // first, preserve the whole response for error logging
+    let data: Value = resp.json().await?;
+    let data_for_error_msg = serde_json::to_string(&data)
+        .unwrap_or_else(|e| format!("error serializing gemini response: {}", e));
+    // then convert to our Response type for further processing
+    let data: Response = serde_json::from_value(data)
+        .map_err(|e| Error::Other(format!(
+            "error deserializing gemini response: {}. Response was: {}",
+            e, data_for_error_msg,
+        )))?;
     let usage = data.usage_metadata.unwrap_or_default();
 
     let text = data
@@ -263,7 +272,12 @@ async fn read_response(resp: reqwest::Response) -> Result<RawResponse> {
         .and_then(|c| c.parts)
         .and_then(|p| p.into_iter().next())
         .and_then(|p| p.text)
-        .ok_or_else(|| Error::Other("no content in gemini response".into()))?;
+        .ok_or_else(|| {
+            Error::Other(format!(
+                "no content in gemini response: {}",
+                data_for_error_msg,
+            ))
+        })?;
 
     Ok(RawResponse {
         content: text,
